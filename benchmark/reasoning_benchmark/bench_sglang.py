@@ -13,6 +13,9 @@ from sglang.test.test_utils import (
     select_sglang_backend,
 )
 from sglang.utils import dump_state_text
+from sglang.global_config import global_config
+
+# global_config.skip_special_tokens_in_output = False
 
 
 @sgl.function

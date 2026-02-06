@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+import torch
 from collections import defaultdict
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Dict, List, Optional, Union
@@ -127,6 +128,15 @@ class SchedulerMetricsMixin:
 
         self.scheduler_status_logger = SchedulerStatusLogger.maybe_create()
 
+        # Initialize decode log file
+        filename = f"decode_log_{time.strftime('%Y%m%d_%H%M%S')}.txt"
+        self.decode_log_file = open(filename, "w")
+
+    def write_decode_log(self, msg: str):
+        if self.decode_log_file:
+            self.decode_log_file.write(msg + "\n")
+            self.decode_log_file.flush()
+
     def init_kv_events(self: Scheduler, kv_events_config: Optional[str]):
         if self.enable_kv_cache_events:
             self.kv_event_publisher = EventPublisherFactory.create(
@@ -234,7 +244,11 @@ class SchedulerMetricsMixin:
 
         msg += f"{graph_backend[self.device]}: {can_run_cuda_graph}"
 
+        for req in can_run_list:
+            self.write_decode_log(f"----------------\nStart request {req.rid}")
+
         logger.info(msg)
+
 
         if self.enable_metrics:
             # Basics
@@ -304,7 +318,10 @@ class SchedulerMetricsMixin:
             )
 
     def log_decode_stats(
-        self: Scheduler, can_run_cuda_graph: bool, running_batch: ScheduleBatch = None
+        self: Scheduler,
+        can_run_cuda_graph: bool,
+        running_batch: ScheduleBatch = None,
+        new_token_ids: Union[List[int], List[List[int]]] = None,
     ):
         batch = running_batch or self.running_batch
 
@@ -367,6 +384,21 @@ class SchedulerMetricsMixin:
         iter_msg = f" [{self.forward_ct}]" if LOG_FORWARD_ITERS else ""
         msg = f"Decode batch{iter_msg}, #running-req: {num_running_reqs}, {token_usage_msg}"
 
+        if new_token_ids is not None:
+            if isinstance(new_token_ids, torch.Tensor):
+                new_token_ids = new_token_ids.tolist()
+
+            if self.tokenizer is not None:
+                try:
+                    decoded = self.tokenizer.batch_decode(new_token_ids)
+                    msg += f"tokens: {decoded}, "
+                except Exception as e:
+                    msg += f"token_ids: {new_token_ids} (err: {e}), "
+            else:
+                msg += f"token_ids: {new_token_ids}, "
+        else:
+            msg += f"new_token_ids is None, "
+
         if self.spec_algorithm.is_none():
             spec_accept_length = 0
             spec_accept_rate = 0
@@ -412,6 +444,7 @@ class SchedulerMetricsMixin:
         )
 
         logger.info(msg)
+        self.write_decode_log(msg)
         if self.enable_metrics:
             # Basics
             self.stats.num_running_reqs = num_running_reqs

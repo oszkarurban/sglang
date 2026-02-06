@@ -35,6 +35,10 @@ if TYPE_CHECKING:
         Scheduler,
     )
 
+import json
+import os
+import time
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_FORCE_STREAM_INTERVAL = 50
@@ -192,6 +196,7 @@ class SchedulerOutputProcessorMixin:
                         self.maybe_collect_routed_experts(req)
                         release_kv_cache(req, self.tree_cache)
                         req.time_stats.completion_time = time.perf_counter()
+                        self.write_decode_log(f"Finish request {req.rid}\n----------------")
                     elif not batch.decoding_reqs or req not in batch.decoding_reqs:
                         # This updates radix so others can match
                         self.tree_cache.cache_unfinished_req(req)
@@ -505,6 +510,7 @@ class SchedulerOutputProcessorMixin:
                     release_kv_cache(req, self.tree_cache)
 
                 req.time_stats.completion_time = time.perf_counter()
+                self.write_decode_log(f"Finish request {req.rid}\n----------------")
 
             self.maybe_collect_customized_info(i, req, logits_output)
 
@@ -554,13 +560,15 @@ class SchedulerOutputProcessorMixin:
         self.stream_output(batch.reqs, batch.return_logprob)
         self.token_to_kv_pool_allocator.free_group_end()
 
-        self.forward_ct_decode = (self.forward_ct_decode + 1) % (1 << 30)
         if self.current_scheduler_metrics_enabled:
             if self.forward_ct_decode % self.server_args.decode_log_interval == 0:
-                self.log_decode_stats(can_run_cuda_graph, running_batch=batch)
+                self.log_decode_stats(
+                    can_run_cuda_graph, running_batch=batch, new_token_ids=next_token_ids
+                )
             self.log_decode_stats_every_iteration(
                 batch, num_accepted_tokens=result.num_accepted_tokens
             )
+        self.forward_ct_decode = (self.forward_ct_decode + 1) % (1 << 30)
 
     def _mamba_prefix_cache_update(
         self, req: Req, batch: ScheduleBatch, result: GenerationBatchResult, i: int

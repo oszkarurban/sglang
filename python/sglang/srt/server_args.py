@@ -388,7 +388,7 @@ class ServerArgs:
     prompt_tokens_buckets: Optional[List[str]] = None
     generation_tokens_buckets: Optional[List[str]] = None
     gc_warning_threshold_secs: float = 0.0
-    decode_log_interval: int = 40
+    decode_log_interval: int = 1 #original 40
     enable_request_time_stats_logging: bool = False
     kv_events_config: Optional[str] = None
     enable_trace: bool = False

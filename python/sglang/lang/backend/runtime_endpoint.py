@@ -210,6 +210,7 @@ class RuntimeEndpoint(BaseBackend):
                 **sampling_params.to_srt_kwargs(),
             },
         }
+        # print(f"DEBUG: generate_stream data={data}")
 
         for item in [
             "return_logprob",
