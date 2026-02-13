@@ -220,6 +220,7 @@ class EagleVerifyInput(SpecInput, EagleVerifyInputV2Mixin):
         token_to_kv_pool_allocator: BaseTokenToKVPoolAllocator,
         page_size: int,
         vocab_mask: Optional[torch.Tensor] = None,  # For grammar
+        think_end_token_id: Optional[int] = None,
     ) -> torch.Tensor:
         """
         Verify and find accepted tokens based on logits output and batch
@@ -249,6 +250,7 @@ class EagleVerifyInput(SpecInput, EagleVerifyInputV2Mixin):
                     dtype=torch.int32,
                     device=batch.device,
                 ),
+                debug_logs=[],
             )
 
         bs = self.retrive_index.shape[0]
@@ -389,11 +391,21 @@ class EagleVerifyInput(SpecInput, EagleVerifyInputV2Mixin):
         unfinished_accept_index = []
         accept_index_cpu = accept_index.tolist()
         predict_cpu = predict.tolist()
+        debug_logs = []
         has_finished = False
 
         # Iterate every accepted token and check if req has finished after append the token
         # should be checked BEFORE free kv cache slots
         for i, (req, accept_index_row) in enumerate(zip(batch.reqs, accept_index_cpu)):
+            stage = "Answer" if getattr(req, "spec_has_seen_think_token", False) else "Thinking"
+            msg = (
+                f"Request {req.rid} stage: {stage}, "
+                f"speculative_num_steps: {self.spec_steps}, "
+                f"speculative_eagle_top_k: {self.topk}, "
+                f"speculative_num_draft_tokens: {self.draft_token_num}"
+            )
+            debug_logs.append(msg)
+            req.spec_last_logged_stage = stage
             num_accepted = 0
             for j, idx in enumerate(accept_index_row):
                 if idx == -1:
@@ -429,6 +441,19 @@ class EagleVerifyInput(SpecInput, EagleVerifyInputV2Mixin):
             req.spec_accepted_tokens += (
                 sum(1 for idx in accept_index_row if idx != -1) - 1
             )
+
+            # Check for think_end_token_id to switch stages
+            if think_end_token_id is not None and not req.spec_has_seen_think_token:
+                for idx in accept_index_row:
+                    if idx == -1:
+                        break
+                    token_id = predict_cpu[idx]
+                    if token_id == think_end_token_id:
+                        req.spec_has_seen_think_token = True
+                        msg = f"Finish thinking request {req.rid}\n----------------"
+                        debug_logs.append(msg)
+                        logger.info(f"Request {req.rid} finished thinking stage.")
+                        break
 
         if has_finished:
             accept_length = (accept_index != -1).sum(dim=1) - 1
@@ -536,6 +561,8 @@ class EagleVerifyInput(SpecInput, EagleVerifyInputV2Mixin):
                 verified_id=verified_id,
                 accept_length_per_req_cpu=draft_input.accept_length_cpu,
                 accepted_indices=accept_index,
+                debug_logs=debug_logs,
+                # finished_thinking_reqs=finished_thinking_reqs,
             )
         else:
             if page_size == 1 or self.topk == 1:
@@ -609,6 +636,7 @@ class EagleVerifyInput(SpecInput, EagleVerifyInputV2Mixin):
                 verified_id=verified_id,
                 accept_length_per_req_cpu=accept_length_list,
                 accepted_indices=accept_index,
+                debug_logs=debug_logs,
             )
 
 
@@ -819,3 +847,4 @@ class EagleVerifyOutput:
     accept_length_per_req_cpu: List[int]
     # Accepted indices from logits_output.next_token_logits
     accepted_indices: torch.Tensor
+    debug_logs: List[str] = None

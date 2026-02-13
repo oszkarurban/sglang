@@ -461,6 +461,10 @@ class SchedulerOutputProcessorMixin:
         if self.enable_metrics:
             self.metrics_collector.increment_cuda_graph_pass(value=can_run_cuda_graph)
 
+        if result.debug_logs:
+            for log in result.debug_logs:
+                self.write_decode_log(log)
+
         self.token_to_kv_pool_allocator.free_group_begin()
 
         # NOTE: in any case, we should check finish here
@@ -498,7 +502,6 @@ class SchedulerOutputProcessorMixin:
             self._mamba_prefix_cache_update(req, batch, result, i)
 
             req.check_finished(new_accepted_len)
-
             if req.finished():
                 self.maybe_collect_routed_experts(req)
 

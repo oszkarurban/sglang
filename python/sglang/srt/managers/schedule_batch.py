@@ -768,6 +768,10 @@ class Req:
         # This is used to compute the acceptance rate and average acceptance length per request.
         self.spec_accepted_tokens = 0
 
+        # Dynamic Speculative Decoding: Per-request mode tracking
+        # Track if this request has encountered the </think> token
+        self.spec_has_seen_think_token = False
+
         # The number of times this request has been retracted / preempted.
         self.retraction_count = 0
         self.retraction_mb_id = None

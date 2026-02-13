@@ -129,6 +129,18 @@ class EAGLEWorker(TpModelWorker):
         else:
             self.hot_token_id = None
 
+        self.think_end_token_id = None
+        if hasattr(self.target_worker, "tokenizer") and self.target_worker.tokenizer is not None:
+            try:
+                self.think_end_token_id = self.target_worker.tokenizer.convert_tokens_to_ids("</think>")
+                if isinstance(self.think_end_token_id, int):
+                    logger.info(f"Dynamic speculative decoding: think_end_token_id set to {self.think_end_token_id}")
+                else:
+                    self.think_end_token_id = None
+                    logger.warning("Dynamic speculative decoding: </think> token not found in tokenizer.")
+            except Exception as e:
+                logger.warning(f"Dynamic speculative decoding: Failed to get </think> token id. Error: {e}")
+
         # Init draft worker
         if server_args.enable_dp_attention and self.speculative_algorithm.is_eagle3():
             ctx = draft_tp_context(get_attention_tp_group())
@@ -326,6 +338,7 @@ class EAGLEWorker(TpModelWorker):
                 num_accepted_tokens=sum(verify_output.accept_length_per_req_cpu),
                 accept_length_per_req_cpu=verify_output.accept_length_per_req_cpu,
                 can_run_cuda_graph=can_run_cuda_graph,
+                debug_logs=verify_output.debug_logs or [],
             )
 
     def check_forward_draft_extend_after_decode(self, batch: ScheduleBatch):
@@ -743,6 +756,7 @@ class EAGLEWorker(TpModelWorker):
             self.token_to_kv_pool_allocator,
             self.page_size,
             vocab_mask,
+            think_end_token_id=self.think_end_token_id,
         )
 
         # Post process based on verified outputs.
