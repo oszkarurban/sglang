@@ -387,6 +387,24 @@ class EagleVerifyInput(SpecInput, EagleVerifyInputV2Mixin):
                 spec_steps=self.spec_steps,
             )
 
+        # Determine stage and dynamic hyperparameters for the batch
+        stage = "Thinking"
+        if len(batch.reqs) > 0:
+            req = batch.reqs[0]
+            stage = "Answer" if getattr(req, "spec_has_seen_think_token", False) else "Thinking"
+
+        server_args = get_global_server_args()
+        
+        # Default to base values from server args
+        current_spec_steps = server_args.speculative_num_steps
+        current_topk = server_args.speculative_eagle_topk
+        current_draft_token_num = server_args.speculative_num_draft_tokens
+
+        if stage == "Answer":
+            current_spec_steps = server_args.speculative_num_steps + 2
+            current_topk = server_args.speculative_eagle_topk + 2
+            current_draft_token_num = server_args.speculative_num_draft_tokens + 2
+            
         unfinished_index = []
         unfinished_accept_index = []
         accept_index_cpu = accept_index.tolist()
@@ -397,15 +415,16 @@ class EagleVerifyInput(SpecInput, EagleVerifyInputV2Mixin):
         # Iterate every accepted token and check if req has finished after append the token
         # should be checked BEFORE free kv cache slots
         for i, (req, accept_index_row) in enumerate(zip(batch.reqs, accept_index_cpu)):
-            stage = "Answer" if getattr(req, "spec_has_seen_think_token", False) else "Thinking"
+            req_stage = "Answer" if getattr(req, "spec_has_seen_think_token", False) else "Thinking"
+            # if req_stage != getattr(req, "spec_last_logged_stage", None): 
             msg = (
-                f"Request {req.rid} stage: {stage}, "
-                f"speculative_num_steps: {self.spec_steps}, "
-                f"speculative_eagle_top_k: {self.topk}, "
-                f"speculative_num_draft_tokens: {self.draft_token_num}"
+                f"Request {req.rid} stage: {req_stage}, "
+                f"speculative_num_steps: {current_spec_steps}, "
+                f"speculative_eagle_top_k: {current_topk}, "
+                f"speculative_num_draft_tokens: {current_draft_token_num}"
             )
             debug_logs.append(msg)
-            req.spec_last_logged_stage = stage
+            req.spec_last_logged_stage = req_stage
             num_accepted = 0
             for j, idx in enumerate(accept_index_row):
                 if idx == -1:
@@ -620,6 +639,9 @@ class EagleVerifyInput(SpecInput, EagleVerifyInputV2Mixin):
                     req_pool_indices_for_draft_extend=batch.req_pool_indices[
                         unfinished_index_device
                     ],
+                    spec_steps=current_spec_steps,
+                    topk=current_topk,
+                    draft_token_num=current_draft_token_num,
                 )
             else:
                 draft_input = EagleDraftInput.create_idle_input(
@@ -660,6 +682,11 @@ class EagleDraftInput(SpecInput, EagleDraftInputV2Mixin):
     # shape: (b + 1,)
     kv_indptr: torch.Tensor = None
     kv_indices: torch.Tensor = None
+
+    # Speculative hyperparameters (always set by verify)
+    spec_steps: int = None
+    topk: int = None
+    draft_token_num: int = None
 
     # Shape info for padding
     num_tokens_per_batch: int = -1

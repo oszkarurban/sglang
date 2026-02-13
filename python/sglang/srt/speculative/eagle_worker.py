@@ -582,6 +582,10 @@ class EAGLEWorker(TpModelWorker):
                 self.speculative_num_draft_tokens,
             )
 
+        spec_steps = spec_info.spec_steps if spec_info.spec_steps is not None else self.speculative_num_steps
+        topk = spec_info.topk if spec_info.topk is not None else self.topk
+        draft_token_num = spec_info.draft_token_num if spec_info.draft_token_num is not None else self.speculative_num_draft_tokens
+
         (
             tree_mask,
             position,
@@ -596,9 +600,9 @@ class EAGLEWorker(TpModelWorker):
             draft_tokens,
             batch.seq_lens,
             batch.seq_lens_sum,
-            self.topk,
-            self.speculative_num_steps,
-            self.speculative_num_draft_tokens,
+            topk,
+            spec_steps,
+            draft_token_num,
         )
 
         return EagleVerifyInput(
@@ -609,9 +613,9 @@ class EAGLEWorker(TpModelWorker):
             retrive_next_token=retrive_next_token,
             retrive_next_sibling=retrive_next_sibling,
             retrive_cum_len=None,
-            spec_steps=self.speculative_num_steps,
-            topk=self.topk,
-            draft_token_num=self.server_args.speculative_num_draft_tokens,
+            spec_steps=spec_steps,
+            topk=topk,
+            draft_token_num=draft_token_num,
             capture_hidden_mode=CaptureHiddenMode.FULL,
             seq_lens_sum=forward_batch.seq_lens_sum,
             seq_lens_cpu=forward_batch.seq_lens_cpu,
@@ -627,14 +631,18 @@ class EAGLEWorker(TpModelWorker):
             spec_info.topk_index,
             spec_info.hidden_states,
         )
+
+        spec_steps = spec_info.spec_steps if spec_info.spec_steps is not None else self.speculative_num_steps
+        topk = spec_info.topk if spec_info.topk is not None else self.topk
+
         if self.hot_token_id is not None:
             topk_index = self.hot_token_id[topk_index]
         # TODO: We only need self.speculative_num_steps - 1 cache loc
         out_cache_loc = out_cache_loc.reshape(
-            forward_batch.batch_size, self.topk, self.speculative_num_steps
+            forward_batch.batch_size, topk, spec_steps
         )
         out_cache_loc = out_cache_loc.permute((2, 0, 1)).reshape(
-            self.speculative_num_steps, -1
+            spec_steps, -1
         )
 
         # Return values
@@ -644,16 +652,16 @@ class EAGLEWorker(TpModelWorker):
 
         # Forward multiple steps
         scores = None
-        for i in range(self.speculative_num_steps):
+        for i in range(spec_steps):
             input_ids, hidden_states, scores, tree_info = select_top_k_tokens(
-                i, topk_p, topk_index, hidden_states, scores, self.topk
+                i, topk_p, topk_index, hidden_states, scores, topk
             )
             score_list.append(tree_info[0])
             token_list.append(tree_info[1])
             parents_list.append(tree_info[2])
 
             # We don't need to run the last forward. we get 1 token from draft prefill and (#spec steps - 1) tokens here
-            if i == self.speculative_num_steps - 1:
+            if i == spec_steps - 1:
                 break
 
             # Set inputs
@@ -678,7 +686,7 @@ class EAGLEWorker(TpModelWorker):
             if self.server_args.enable_nan_detection:
                 detect_nan(logits_output)
             probs = torch.softmax(logits_output.next_token_logits, dim=-1)
-            topk_p, topk_index = fast_topk(probs, self.topk, dim=-1)
+            topk_p, topk_index = fast_topk(probs, topk, dim=-1)
             if self.hot_token_id is not None:
                 topk_index = self.hot_token_id[topk_index]
             hidden_states = logits_output.hidden_states
