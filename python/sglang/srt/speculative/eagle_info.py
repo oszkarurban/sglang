@@ -403,6 +403,13 @@ class EagleVerifyInput(SpecInput, EagleVerifyInputV2Mixin):
         # dynamic_spec_decoding: absolute values [spec_steps, topk, draft_token_num] for Answer mode
         if server_args.dynamic_spec_decoding and stage == "Answer":
             current_spec_steps, current_topk, current_draft_token_num = server_args.dynamic_spec_decoding
+
+        #TODO: i might want to uncomment this later
+        # Clamp draft_token_num: cannot exceed topk^spec_steps + 1
+        # (the draft tree produces at most topk^spec_steps candidate scores)
+        max_draft_tokens = current_topk ** current_spec_steps + 1
+        if current_draft_token_num > max_draft_tokens:
+            current_draft_token_num = max_draft_tokens
             
         unfinished_index = []
         unfinished_accept_index = []
@@ -860,6 +867,24 @@ class EagleDraftInput(SpecInput, EagleDraftInputV2Mixin):
             [self.hidden_states, spec_info.hidden_states], axis=0
         )
         self.verified_id = torch.cat([self.verified_id, spec_info.verified_id], axis=0)
+
+        # Pad topk_p and topk_index to max width before concatenation.
+        # Different topk values (e.g., Thinking vs Answer mode) produce different
+        # tensor widths. Padding with 0 is safe: zero probabilities won't be
+        # selected by topk operations in select_top_k_tokens.
+        w_self = self.topk_p.shape[1]
+        w_other = spec_info.topk_p.shape[1]
+        if w_self != w_other:
+            max_w = max(w_self, w_other)
+            if w_self < max_w:
+                self.topk_p = torch.nn.functional.pad(self.topk_p, (0, max_w - w_self))
+                self.topk_index = torch.nn.functional.pad(self.topk_index, (0, max_w - w_self))
+            if w_other < max_w:
+                spec_info.topk_p = torch.nn.functional.pad(spec_info.topk_p, (0, max_w - w_other))
+                spec_info.topk_index = torch.nn.functional.pad(spec_info.topk_index, (0, max_w - w_other))
+            # Update batch-level topk to the padded width
+            self.topk = max_w
+
         self.topk_p = torch.cat([self.topk_p, spec_info.topk_p])
         self.topk_index = torch.cat([self.topk_index, spec_info.topk_index])
 

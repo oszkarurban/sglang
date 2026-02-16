@@ -3914,7 +3914,8 @@ class ServerArgs:
             help="Enable dynamic speculative decoding with configurable Answer-mode values. "
                  "Provide 3 integers: the absolute spec_steps, topk, and draft_token_num "
                  "to use when the model switches to Answer stage. "
-                 "Example: --dynamic-spec-decoding 5 5 10",
+                 "draft_token_num is auto-clamped to topk^spec_steps + 1. "
+                 "Example: --dynamic-spec-decoding 5 4 20",
         )
         parser.add_argument(
             "--dynamic-spec-decoding-gradual",
