@@ -473,6 +473,8 @@ class ServerArgs:
     speculative_moe_runner_backend: Optional[str] = None
     speculative_moe_a2a_backend: Optional[str] = None
     speculative_draft_model_quantization: Optional[str] = None
+    dynamic_spec_decoding: Optional[List[int]] = None
+    dynamic_spec_decoding_gradual: bool = False
 
     # Speculative decoding (ngram)
     speculative_ngram_min_match_window_size: int = 1
@@ -3902,6 +3904,23 @@ class ServerArgs:
             choices=SPECULATIVE_DRAFT_MODEL_QUANTIZATION_CHOICES,
             default=ServerArgs.speculative_draft_model_quantization,
             help="The quantization method for speculative model.",
+        )
+        parser.add_argument(
+            "--dynamic-spec-decoding",
+            type=int,
+            nargs=3,
+            metavar=("SPEC_STEPS", "TOPK", "DRAFT_TOKENS"),
+            default=ServerArgs.dynamic_spec_decoding,
+            help="Enable dynamic speculative decoding with configurable Answer-mode values. "
+                 "Provide 3 integers: the absolute spec_steps, topk, and draft_token_num "
+                 "to use when the model switches to Answer stage. "
+                 "Example: --dynamic-spec-decoding 5 5 10",
+        )
+        parser.add_argument(
+            "--dynamic-spec-decoding-gradual",
+            action="store_true",
+            default=ServerArgs.dynamic_spec_decoding_gradual,
+            help="Enable gradual increase of speculative decoding hyperparameters by 1 every 100 tokens (max +4).",
         )
 
         # Speculative decoding (ngram)

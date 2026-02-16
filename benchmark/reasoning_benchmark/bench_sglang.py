@@ -35,7 +35,9 @@ def convert_dataset(path: str, question_key: str, answer_key: str, num_tries: in
     raw_dataset = load_dataset(path)
     questions = []
     answers = []
-    for data in raw_dataset["train"]:
+    subdataset = raw_dataset["train"]
+    subdataset = subdataset.select(range(1))
+    for data in subdataset:
         question = data[question_key]
         answer = data[answer_key]
         for _ in range(num_tries):
@@ -59,7 +61,7 @@ def main(args):
         questions,
         num_threads=args.parallel,
         progress_bar=True,
-        temperature=0.6,
+        temperature=0,#0.6,
         max_new_tokens=32768,
         top_p=0.95,
     )

@@ -322,6 +322,7 @@ class SchedulerMetricsMixin:
         can_run_cuda_graph: bool,
         running_batch: ScheduleBatch = None,
         new_token_ids: Union[List[int], List[List[int]]] = None,
+        debug_logs: List[str] = None,
     ):
         batch = running_batch or self.running_batch
 
@@ -444,6 +445,9 @@ class SchedulerMetricsMixin:
         )
 
         logger.info(msg)
+        if debug_logs:
+            for log in debug_logs:
+                self.write_decode_log(log)
         self.write_decode_log(msg)
         if self.enable_metrics:
             # Basics

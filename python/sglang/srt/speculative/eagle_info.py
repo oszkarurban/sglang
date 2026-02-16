@@ -400,10 +400,9 @@ class EagleVerifyInput(SpecInput, EagleVerifyInputV2Mixin):
         current_topk = server_args.speculative_eagle_topk
         current_draft_token_num = server_args.speculative_num_draft_tokens
 
-        if stage == "Answer":
-            current_spec_steps = server_args.speculative_num_steps + 2
-            current_topk = server_args.speculative_eagle_topk + 2
-            current_draft_token_num = server_args.speculative_num_draft_tokens + 2
+        # dynamic_spec_decoding: absolute values [spec_steps, topk, draft_token_num] for Answer mode
+        if server_args.dynamic_spec_decoding and stage == "Answer":
+            current_spec_steps, current_topk, current_draft_token_num = server_args.dynamic_spec_decoding
             
         unfinished_index = []
         unfinished_accept_index = []
@@ -412,11 +411,10 @@ class EagleVerifyInput(SpecInput, EagleVerifyInputV2Mixin):
         debug_logs = []
         has_finished = False
 
-        # Iterate every accepted token and check if req has finished after append the token
-        # should be checked BEFORE free kv cache slots
-        for i, (req, accept_index_row) in enumerate(zip(batch.reqs, accept_index_cpu)):
+        # Log once per verification cycle (not per request)
+        if len(batch.reqs) > 0:
+            req = batch.reqs[0]
             req_stage = "Answer" if getattr(req, "spec_has_seen_think_token", False) else "Thinking"
-            # if req_stage != getattr(req, "spec_last_logged_stage", None): 
             msg = (
                 f"Request {req.rid} stage: {req_stage}, "
                 f"speculative_num_steps: {current_spec_steps}, "
@@ -424,7 +422,10 @@ class EagleVerifyInput(SpecInput, EagleVerifyInputV2Mixin):
                 f"speculative_num_draft_tokens: {current_draft_token_num}"
             )
             debug_logs.append(msg)
-            req.spec_last_logged_stage = req_stage
+
+        # Iterate every accepted token and check if req has finished after append the token
+        # should be checked BEFORE free kv cache slots
+        for i, (req, accept_index_row) in enumerate(zip(batch.reqs, accept_index_cpu)):
             num_accepted = 0
             for j, idx in enumerate(accept_index_row):
                 if idx == -1:
@@ -572,8 +573,10 @@ class EagleVerifyInput(SpecInput, EagleVerifyInputV2Mixin):
                 seq_lens_for_draft_extend=batch.seq_lens,
                 seq_lens_for_draft_extend_cpu=batch.seq_lens_cpu,
                 req_pool_indices_for_draft_extend=batch.req_pool_indices,
+                spec_steps=current_spec_steps,
+                topk=current_topk,
+                draft_token_num=current_draft_token_num,
             )
-
             return EagleVerifyOutput(
                 draft_input=draft_input,
                 logits_output=logits_output,
@@ -581,7 +584,6 @@ class EagleVerifyInput(SpecInput, EagleVerifyInputV2Mixin):
                 accept_length_per_req_cpu=draft_input.accept_length_cpu,
                 accepted_indices=accept_index,
                 debug_logs=debug_logs,
-                # finished_thinking_reqs=finished_thinking_reqs,
             )
         else:
             if page_size == 1 or self.topk == 1:

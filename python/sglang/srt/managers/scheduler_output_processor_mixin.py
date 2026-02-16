@@ -461,9 +461,12 @@ class SchedulerOutputProcessorMixin:
         if self.enable_metrics:
             self.metrics_collector.increment_cuda_graph_pass(value=can_run_cuda_graph)
 
-        if result.debug_logs:
-            for log in result.debug_logs:
-                self.write_decode_log(log)
+        # Store debug_logs for later use in decode batch message
+        batch_debug_logs = result.debug_logs if result.debug_logs else []
+        # if result.debug_logs:
+        #     for log in result.debug_logs:
+        #         self.write_decode_log(log)
+
 
         self.token_to_kv_pool_allocator.free_group_begin()
 
@@ -566,7 +569,7 @@ class SchedulerOutputProcessorMixin:
         if self.current_scheduler_metrics_enabled:
             if self.forward_ct_decode % self.server_args.decode_log_interval == 0:
                 self.log_decode_stats(
-                    can_run_cuda_graph, running_batch=batch, new_token_ids=next_token_ids
+                    can_run_cuda_graph, running_batch=batch, new_token_ids=next_token_ids, debug_logs=batch_debug_logs
                 )
             self.log_decode_stats_every_iteration(
                 batch, num_accepted_tokens=result.num_accepted_tokens
