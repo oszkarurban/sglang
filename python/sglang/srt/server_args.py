@@ -475,6 +475,14 @@ class ServerArgs:
     speculative_draft_model_quantization: Optional[str] = None
     dynamic_spec_decoding: Optional[List[int]] = None
     dynamic_spec_decoding_gradual: bool = False
+    
+    # Dynamic Speculative Decoding (Window)
+    dynamic_spec_max: Optional[List[int]] = None
+    dynamic_spec_min: Optional[List[int]] = None
+    dynamic_spec_window_size: int = 0
+    dynamic_spec_window_up: float = 0.8
+    dynamic_spec_window_down: float = 0.2
+    dynamic_spec_step_size: Optional[List[int]] = None
 
     # Speculative decoding (ngram)
     speculative_ngram_min_match_window_size: int = 1
@@ -3922,6 +3930,52 @@ class ServerArgs:
             action="store_true",
             default=ServerArgs.dynamic_spec_decoding_gradual,
             help="Enable gradual increase of speculative decoding hyperparameters by 1 every 100 tokens (max +4).",
+        )
+        parser.add_argument(
+            "--dynamic-spec-max",
+            type=int,
+            nargs=3,
+            metavar=("MAX_SPEC_STEPS", "MAX_TOPK", "MAX_DRAFT_TOKENS"),
+            default=ServerArgs.dynamic_spec_max,
+            help="Enable window-based dynamic speculative decoding. "
+                 "Provide 3 integers: the maximum absolute spec_steps, topk, and draft_token_num "
+                 "that the system is allowed to scale up to. This determines backend preallocation bounds. "
+                 "Example: --dynamic-spec-max 6 4 32",
+        )
+        parser.add_argument(
+            "--dynamic-spec-min",
+            type=int,
+            nargs=3,
+            metavar=("MIN_SPEC_STEPS", "MIN_TOPK", "MIN_DRAFT_TOKENS"),
+            default=ServerArgs.dynamic_spec_min,
+            help="Minimum lower bounds for the hyperparameters when they scale down."
+                 "Example: --dynamic-spec-min 1 1 2",
+        )
+        parser.add_argument(
+            "--dynamic-spec-window-size",
+            type=int,
+            default=ServerArgs.dynamic_spec_window_size,
+            help="The size of the sliding window (number of steps) used to average the acceptance rate. Default: 0 (disabled).",
+        )
+        parser.add_argument(
+            "--dynamic-spec-window-up",
+            type=float,
+            default=ServerArgs.dynamic_spec_window_up,
+            help="The acceptance rate threshold to trigger scaling *up* hyperparameters. Default: 0.8.",
+        )
+        parser.add_argument(
+            "--dynamic-spec-window-down",
+            type=float,
+            default=ServerArgs.dynamic_spec_window_down,
+            help="The acceptance rate threshold to trigger scaling *down* hyperparameters. Default: 0.2.",
+        )
+        parser.add_argument(
+            "--dynamic-spec-step-size",
+            type=int,
+            nargs=3,
+            metavar=("STEP_SIZE_STEPS", "STEP_SIZE_TOPK", "STEP_SIZE_DRAFT_TOKENS"),
+            default=ServerArgs.dynamic_spec_step_size,
+            help="The step sizes to increment/decrement hyperparameters when thresholds are met. Default: [1, 1, 2].",
         )
 
         # Speculative decoding (ngram)

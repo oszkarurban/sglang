@@ -772,6 +772,12 @@ class Req:
         # Track if this request has encountered the </think> token
         self.spec_has_seen_think_token = False
 
+        # Dynamic Window state tracking
+        self.window_history: List[float] = []
+        self.current_spec_steps: Optional[int] = None
+        self.current_topk: Optional[int] = None
+        self.current_draft_token_num: Optional[int] = None
+
         # The number of times this request has been retracted / preempted.
         self.retraction_count = 0
         self.retraction_mb_id = None

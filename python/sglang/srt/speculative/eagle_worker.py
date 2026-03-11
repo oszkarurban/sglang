@@ -97,7 +97,11 @@ class EAGLEWorker(TpModelWorker):
         # When dynamic_spec_decoding is enabled, Answer mode uses the specified absolute values.
         # Attention backends must be sized for the maximum values since they
         # are created once at startup and cannot be resized.
-        if server_args.dynamic_spec_decoding:
+        if server_args.dynamic_spec_max:
+            dyn_steps, dyn_topk, _ = server_args.dynamic_spec_max
+            self.max_speculative_num_steps = max(self.speculative_num_steps, dyn_steps)
+            self.max_topk = max(self.topk, dyn_topk)
+        elif server_args.dynamic_spec_decoding:
             dyn_steps, dyn_topk, _ = server_args.dynamic_spec_decoding
             self.max_speculative_num_steps = max(self.speculative_num_steps, dyn_steps)
             self.max_topk = max(self.topk, dyn_topk)
@@ -158,6 +162,8 @@ class EAGLEWorker(TpModelWorker):
             ctx = draft_tp_context(get_attention_tp_group())
         else:
             ctx = empty_context()
+        if self.speculative_algorithm.is_eagle3():
+            server_args.json_model_override_args = '{"architectures": ["LlamaForCausalLMEagle3"]}'
         with (
             ctx
         ), speculative_moe_backend_context(), speculative_moe_a2a_backend_context():

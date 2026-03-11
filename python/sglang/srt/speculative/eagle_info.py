@@ -400,17 +400,44 @@ class EagleVerifyInput(SpecInput, EagleVerifyInputV2Mixin):
         current_topk = server_args.speculative_eagle_topk
         current_draft_token_num = server_args.speculative_num_draft_tokens
 
-        # dynamic_spec_decoding: absolute values [spec_steps, topk, draft_token_num] for Answer mode
-        if server_args.dynamic_spec_decoding and stage == "Answer":
-            current_spec_steps, current_topk, current_draft_token_num = server_args.dynamic_spec_decoding
+        # Determine dynamic parameters for Answer mode
+        if stage == "Answer":
+            if server_args.dynamic_spec_window_size > 0:
+                req = batch.reqs[0]
+                if getattr(req, "current_spec_steps", None) is None:
+                    if server_args.dynamic_spec_decoding:
+                        # Start at the specified dynamic values
+                        req.current_spec_steps, req.current_topk, req.current_draft_token_num = server_args.dynamic_spec_decoding
+                    else:
+                        # Start at base arguments
+                        req.current_spec_steps = server_args.speculative_num_steps
+                        req.current_topk = server_args.speculative_eagle_topk
+                        req.current_draft_token_num = server_args.speculative_num_draft_tokens
+                
+                current_spec_steps = req.current_spec_steps
+                current_topk = req.current_topk
+                current_draft_token_num = req.current_draft_token_num
+            elif server_args.dynamic_spec_decoding:
+                # Fall back to the original fixed Answer-mode switch
+                current_spec_steps, current_topk, current_draft_token_num = server_args.dynamic_spec_decoding
 
-        #TODO: i might want to uncomment this later
-        # Clamp draft_token_num: cannot exceed topk^spec_steps + 1
-        # (the draft tree produces at most topk^spec_steps candidate scores)
-        max_draft_tokens = current_topk ** current_spec_steps + 1
+        #TODO: check
+        # Clamp draft_token_num: cannot exceed the total possible tree size limit
+        # EAGLE tree generation math: Step 0 produces topk candidates.
+        # Steps 1 to spec_steps-1 each expand the best topk candidates by topk (thus topk^2 generated).
+        # Total candidates available for verification = topk + (spec_steps - 1) * topk^2.
+        # Plus 1 for the original token = max draft token num.
+        if current_spec_steps > 0:
+            max_draft_tokens = current_topk + (current_spec_steps - 1) * (current_topk ** 2) + 1
+        else:
+            max_draft_tokens = 1
+            
         if current_draft_token_num > max_draft_tokens:
             current_draft_token_num = max_draft_tokens
             
+        # Update the request with the clamped value so the sliding window doesn't permanently detach
+        if stage == "Answer" and server_args.dynamic_spec_window_size > 0:
+            req.current_draft_token_num = current_draft_token_num
         unfinished_index = []
         unfinished_accept_index = []
         accept_index_cpu = accept_index.tolist()
@@ -468,6 +495,41 @@ class EagleVerifyInput(SpecInput, EagleVerifyInputV2Mixin):
             req.spec_accepted_tokens += (
                 sum(1 for idx in accept_index_row if idx != -1) - 1
             )
+
+            # --- Dynamic Window Adjustments ---
+            if server_args.dynamic_spec_window_size > 0 and getattr(req, "current_draft_token_num", None) is not None:
+                step_accept_rate = num_accepted / req.current_draft_token_num
+                req.window_history.append(step_accept_rate)
+                
+                if len(req.window_history) >= server_args.dynamic_spec_window_size:
+                    avg_rate = sum(req.window_history) / len(req.window_history)
+                    req.window_history.clear() # Reset window
+                    
+                    step_s, step_k, step_d = server_args.dynamic_spec_step_size if server_args.dynamic_spec_step_size else [1, 1, 2]
+                    
+                    if server_args.dynamic_spec_max:
+                        max_s, max_k, max_d = server_args.dynamic_spec_max
+                    elif server_args.dynamic_spec_decoding:
+                        max_s, max_k, max_d = server_args.dynamic_spec_decoding
+                    else:
+                        # Fall back to base args if no max was specified (meaning it can't grow)
+                        max_s, max_k, max_d = server_args.speculative_num_steps, server_args.speculative_eagle_topk, server_args.speculative_num_draft_tokens
+                    
+                    if server_args.dynamic_spec_min:
+                        min_s, min_k, min_d = server_args.dynamic_spec_min
+                    else:
+                        # Fall back to 1s if no min was specified
+                        min_s, min_k, min_d = 1, 1, 1
+
+                    if avg_rate >= server_args.dynamic_spec_window_up:
+                        req.current_spec_steps = min(req.current_spec_steps + step_s, max_s)
+                        req.current_topk = min(req.current_topk + step_k, max_k)
+                        req.current_draft_token_num = min(req.current_draft_token_num + step_d, max_d)
+                    elif avg_rate <= server_args.dynamic_spec_window_down:
+                        req.current_spec_steps = max(req.current_spec_steps - step_s, min_s)
+                        req.current_topk = max(req.current_topk - step_k, min_k)
+                        req.current_draft_token_num = max(req.current_draft_token_num - step_d, min_d)
+            # ----------------------------------
 
             # Check for think_end_token_id to switch stages
             if think_end_token_id is not None and not req.spec_has_seen_think_token:
